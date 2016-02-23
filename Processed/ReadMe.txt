@@ -1,0 +1,1 @@
+Photos will be places here after being processed.
