@@ -10,13 +10,14 @@ var pathToScript = ""
 
 
 extension NSImage {
-    var CGImage: CGImageRef? {
+    var CGImage: CGImage? {
         get {
-            var result: CGImageRef?
-            let imageData = self.TIFFRepresentation
-            if let imageDataCFData = imageData {
-                let source = CGImageSourceCreateWithData(imageDataCFData, nil)
-                result = CGImageSourceCreateImageAtIndex(source!, 0, nil)!
+            var result: CGImage?
+            if let data = self.tiffRepresentation {
+                if let imageDataCFData = CFDataCreateWithBytesNoCopy(nil, (data as NSData).bytes.bindMemory(to: UInt8.self, capacity: data.count), data.count, kCFAllocatorNull) {
+                    let source = CGImageSourceCreateWithData(imageDataCFData, nil)
+                    result = CGImageSourceCreateImageAtIndex(source!, 0, nil)!
+                }
             }
             return result
         }
@@ -25,11 +26,16 @@ extension NSImage {
     func writeToFile(path: String) -> Bool {
         var result = false
         if let cgImage = self.CGImage {
-            let imgRep = NSBitmapImageRep(CGImage:cgImage)
+            let imgRep = NSBitmapImageRep(cgImage:cgImage)
             
-            if let data = imgRep.representationUsingType(NSBitmapImageFileType.NSJPEGFileType, properties: [:])
-            {
-                result = data.writeToFile(path, atomically: false)
+            if let data = imgRep.representation(using: NSBitmapImageRep.FileType.jpeg, properties: [:]) {
+                let url = URL(fileURLWithPath: path)
+                do {
+                    try data.write(to: url, options: .atomic)
+                    result = true
+                } catch {
+                    return result
+                }
             }
             
         }
@@ -40,32 +46,33 @@ extension NSImage {
 func convertToGrayScale(image: NSImage) -> NSImage? {
 
     var result: NSImage?
-    let imageRect:CGRect = CGRectMake(0, 0, image.size.width, image.size.height)
+    let imageRect:CGRect = CGRect(x: 0, y: 0, width: image.size.width, height: image.size.height)
     let colorSpace = CGColorSpaceCreateDeviceGray()
     let width = image.size.width
     let height = image.size.height
-    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.None.rawValue)
-    let context = CGBitmapContextCreate(nil, Int(width), Int(height), 8, 0, colorSpace, bitmapInfo.rawValue)
-    if let cgImageRef = image.CGImage {
-        CGContextDrawImage(context, imageRect, cgImageRef)
-        let imageRef = CGBitmapContextCreateImage(context)
-        result = NSImage(CGImage: imageRef!, size: imageRect.size)
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+    if let context = CGContext.init(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: bitmapInfo.rawValue) {
+        if let cgImageRef = image.CGImage {
+            context.draw(cgImageRef, in: imageRect)
+            let imageRef = context.makeImage()
+            result = NSImage(cgImage: imageRef!, size: imageRect.size)
+        }
     }
     return result
 }
 
 func getPathToScriptForArgument(argument: String) -> String {
     var urlString: String = ""
-    
-    urlString = NSURL(fileURLWithPath: argument).absoluteString.stringByReplacingOccurrencesOfString("file://", withString: "", options: NSStringCompareOptions.LiteralSearch, range: nil).stringByReplacingOccurrencesOfString("MakeBlackAndWhite.swift", withString: "", options: NSStringCompareOptions.LiteralSearch, range: nil)
-    
+    if let urlStr = NSURL(fileURLWithPath: argument).absoluteString {
+        urlString = urlStr.replacingOccurrences(of: "file://", with: "", options: NSString.CompareOptions.literal, range: nil).replacingOccurrences(of: "MakeBlackAndWhite.swift", with: "", options: NSString.CompareOptions.literal, range: nil)
+    }
     return urlString
 }
 
 func getFilesInDirectory(directory: String) -> [String] {
     var result = [String]()
-    let fileManager = NSFileManager.defaultManager()
-    let enumerator:NSDirectoryEnumerator = fileManager.enumeratorAtPath(directory)!
+    let fileManager = FileManager.default
+    let enumerator = fileManager.enumerator(atPath: directory)!
     
     
     for element in enumerator {
@@ -76,8 +83,8 @@ func getFilesInDirectory(directory: String) -> [String] {
 
 func getImageAtPath(path: String) -> NSImage? {
     var result: NSImage?
-    if let data = NSData(contentsOfURL: NSURL(fileURLWithPath:path)) {
-        result = NSImage(data:data)
+    if let data = NSData(contentsOf: URL(fileURLWithPath:path)) {
+        result = NSImage(data:data as Data)
     }
     
     return result
@@ -85,21 +92,21 @@ func getImageAtPath(path: String) -> NSImage? {
 
 
 
-for argument in Process.arguments {
-    if Process.arguments.count > 0 {
-        pathToScript = getPathToScriptForArgument(Process.arguments[0])
+for _ in CommandLine.arguments {
+    if CommandLine.arguments.count > 0 {
+        pathToScript = getPathToScriptForArgument(argument: CommandLine.arguments[0])
     }
 }
 let fullSourcePath = "\(pathToScript)\(sourceDirectory)"
-for file in getFilesInDirectory(fullSourcePath) {
+for file in getFilesInDirectory(directory: fullSourcePath) {
     let imagePath = "\(fullSourcePath)/\(file)"
     print("Getting image: \(file)")
-    if let image = getImageAtPath(imagePath) {
-        if let greyImage = convertToGrayScale(image) {
+    if let image = getImageAtPath(path: imagePath) {
+        if let greyImage = convertToGrayScale(image: image) {
             print("Made image: \(file) Grey.")
             let fullProcessedPath = "\(pathToScript)\(processedDirectory)/Processed_\(file)"
             print("Writing image: \(file) to file.")
-            if greyImage.writeToFile(fullProcessedPath) {
+            if greyImage.writeToFile(path: fullProcessedPath) {
                 print("Saved image: \(file)")
             } else {
                 print("Could not save image: \(file)")
@@ -109,6 +116,3 @@ for file in getFilesInDirectory(fullSourcePath) {
         }
     }
 }
-
-
-
